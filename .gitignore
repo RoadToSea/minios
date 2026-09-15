@@ -1,15 +1,15 @@
-# dot files
+# Generated files
+/build/
+/bin/
+/obj/
+/out/
+
+# IDE state and local caches
 /.vscode/launch.json
-/.settings
-/.eide/log
+/.settings/
+/.eide/log/
 /.eide.usr.ctx.json
 
-# project out
-/build
-/bin
-/obj
-/out
-
-# eide template
+# EIDE templates
 *.ept
 *.eide-template
