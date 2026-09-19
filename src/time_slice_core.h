@@ -14,11 +14,15 @@ typedef struct task_block{
     uint8_t *buf;
     uint32_t buf_size;
     void *stack_ptr;
+    uint32_t delay_ticks;       /* 延时队列剩余节拍数，0 = 不在睡 */
 }task_block_t;
 
+/* 全局任务表与当前任务：定义在 time_slice_core.c，task.c / port.c 都要碰 */
+extern rlist_t __task_list;
+extern task_block_t *__current_task;
+
+task_block_t *time_slice_get_next(task_block_t *cur);
 int time_slice_core_init(void);
-int time_slice_add_task(task_block_t * tcb);
-void time_slice_switch_first_task(void);
 int time_slice_start_schedule(void);
 
 #endif

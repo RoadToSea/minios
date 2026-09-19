@@ -50,6 +50,7 @@
 #include "rtos_test.h"
 #include "probe_config.h"
 #include "time_slice_core.h"
+#include "task.h"
 #include "usart_printf.h"
 
 void handleA(void *arg);
@@ -79,7 +80,7 @@ static void SystemConfig(void)
     SCB->ICSR     = SCB_ICSR_PENDSTCLR_Msk;
     SCB->CCR |= SCB_CCR_STKALIGN_Msk;
 
-    SysTick_Config(SystemCoreClock / 1000);
+    // SysTick_Config(SystemCoreClock / 1000);
 
     NVIC_DisableIRQ(TIM2_IRQn);
     NVIC_ClearPendingIRQ(TIM2_IRQn);
@@ -101,6 +102,7 @@ void handleB(void *arg)
 {
     while (1) {
         cntB++; /* 断点打这里，每次被调度进来就 +1 */
+        task_delay(500); /* 睡 500ms：期间 A 独占 CPU，到期后 B 回到就绪表尾部 */
     }
 }
 
@@ -115,8 +117,8 @@ int main(void)
 
     /* 2. 初始化轮转任务调度 (PendSV / SysTick, 进入 PSP 任务多栈环境) */
     time_slice_core_init();
-    time_slice_add_task(&taskA);
-    time_slice_add_task(&taskB);
+    task_add(&taskA);
+    task_add(&taskB);
     time_slice_start_schedule(); /* 从这一行之后，CPU 就属于任务了 */
 
     while (1) {
