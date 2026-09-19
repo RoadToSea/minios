@@ -12,7 +12,6 @@ typedef void (*task_func_t)(void *);
 typedef struct task_block{
     const char *name;
     rlist_t  task_node;
-    rlist_t  delay_node;
     task_func_t func;
     void *func_arg;
     uint8_t *buf;

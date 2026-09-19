@@ -1,7 +1,7 @@
 #ifndef __PORT_H
 #define __PORT_H
 
-#include "time_slice_core.h"
+#include "minios.h"
 
 
 void port_hardware_init(uint32_t beat_ms);

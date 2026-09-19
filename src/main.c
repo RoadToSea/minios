@@ -49,7 +49,7 @@
 #include "debug_probe.h"
 #include "rtos_test.h"
 #include "probe_config.h"
-#include "time_slice_core.h"
+#include "minios.h"
 #include "task.h"
 #include "usart_printf.h"
 

@@ -71,6 +71,30 @@ unsigned int rlist_len(const rlist_t *head);
     for (pos = (head)->next, n = pos->next; pos != (head); \
          pos = n, n = pos->next)
 
+/** 返回链表第一个节点（不摘除），链表为空时返回 NULL */
+#define RLIST_PEEK_FIRST(head) \
+    ((head)->next == (head) ? (rlist_t *)NULL : (head)->next)
+
+/** 返回链表最后一个节点（不摘除），链表为空时返回 NULL */
+#define RLIST_PEEK_LAST(head) \
+    ((head)->prev == (head) ? (rlist_t *)NULL : (head)->prev)
+
+/**
+ * 返回链表第一个节点的宿主结构体指针（不摘除），链表为空时返回 NULL。
+ * type 为宿主结构体类型，member 为节点成员名。
+ */
+#define RLIST_PEEK_FIRST_ENTRY(head, type, member) \
+    ((head)->next == (head) ? (type *)NULL : \
+     RLIST_CONTAINER_OF((head)->next, type, member))
+
+/**
+ * 返回链表最后一个节点的宿主结构体指针（不摘除），链表为空时返回 NULL。
+ * type 为宿主结构体类型，member 为节点成员名。
+ */
+#define RLIST_PEEK_LAST_ENTRY(head, type, member) \
+    ((head)->prev == (head) ? (type *)NULL : \
+     RLIST_CONTAINER_OF((head)->prev, type, member))
+
 /**
  * 遍历并取宿主结构体：pos 为宿主结构体指针（type*），head 为链表头，
  * member 为节点成员名。

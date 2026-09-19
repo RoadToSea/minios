@@ -1,7 +1,7 @@
 #ifndef __TASK_H
 #define __TASK_H
 
-#include "time_slice_core.h"
+#include "minios.h"
 
 void task_init(void);                       /* 初始化任务模块私有的延时队列 */
 int  task_add(task_block_t *tcb);           /* 新任务加入就绪表 */
