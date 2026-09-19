@@ -1,12 +1,11 @@
+#include <stddef.h>
 #include "stm32f10x.h"
 #include "stm32f10x_it.h"
-#include "time_slice_core.h"
+#include "minios.h"
 #include "task.h"
 #include "port.h"
 
 rlist_t __task_list = {0};
-
-task_block_t *__current_task = NULL;     /* 当前正在运行的任务 */
 
 /**
  * 从任务链表中取出下一个要运行的任务（轮转调度）

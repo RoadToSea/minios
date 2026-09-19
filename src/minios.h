@@ -4,17 +4,21 @@
 #include <stdint.h>
 #include "tools/rlist.h"
 
+#define MS_TO_TICK(ms)      (1000/ms)
+
+
 typedef void (*task_func_t)(void *);
 
 typedef struct task_block{
     const char *name;
     rlist_t  task_node;
+    rlist_t  delay_node;
     task_func_t func;
     void *func_arg;
     uint8_t *buf;
     uint32_t buf_size;
     void *stack_ptr;
-    uint32_t delay_ticks;       /* 延时队列剩余节拍数，0 = 不在睡 */
+    uint32_t delay_expire;      /* 绝对到期节拍，仅在延时队列中有效 */
 }task_block_t;
 
 /* 全局任务表与当前任务：定义在 time_slice_core.c，task.c / port.c 都要碰 */

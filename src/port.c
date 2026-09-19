@@ -1,9 +1,8 @@
-#include "stm32f10x.h"
+#include "minios_config.h"
 #include "port.h"
 #include "task.h"
 #include <stddef.h>
 
-#define MS_TO_TICK(ms)      (1000/ms)
 
 static uint32_t tick_reload = 0;    /* SysTick 重装值：init 时只存，start 时才启动*/
 
@@ -18,9 +17,8 @@ void port_hardware_init(uint32_t beat_ms)
      * 无效 PSP 执行 stmdb 压栈 → HardFault。所以这里只装重装值，
      * SysTick 留到 start_first_task 里假帧全部建好之后再启动。
      */
-    tick_reload = SystemCoreClock / MS_TO_TICK(beat_ms);
-    SysTick->CTRL = 0;                      /* 熄火，并顺带清掉 main 里 SystemConfig 开过的心跳 */
-    SysTick->LOAD = tick_reload - 1;
+    SysTick->CTRL = 0;                      /* 关闭Systick运行 */
+    SysTick->LOAD = SYSTICK_RELOAD - 1;
     SysTick->VAL  = 0;
 }
 
