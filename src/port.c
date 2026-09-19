@@ -125,7 +125,6 @@ uint32_t time_slice_switch(uint32_t sp)
 
 void SysTick_Handler(void)
 {
-    task_delay_scan();                      /* 扫延时队列，到期任务移回就绪表 */
 
     SCB->ICSR = SCB_ICSR_PENDSVSET_Msk;     /* 置 PendSV 挂起，请求一次上下文切换 */
 }

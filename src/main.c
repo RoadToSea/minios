@@ -102,7 +102,6 @@ void handleB(void *arg)
 {
     while (1) {
         cntB++; /* 断点打这里，每次被调度进来就 +1 */
-        task_delay(500); /* 睡 500ms：期间 A 独占 CPU，到期后 B 回到就绪表尾部 */
     }
 }
 
