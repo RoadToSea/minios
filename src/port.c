@@ -109,7 +109,8 @@ uint32_t time_slice_switch(uint32_t sp)
         __current_task->stack_ptr = (void *)sp;     /* 保存切出任务的栈顶 */
     }
 
-    next = time_slice_get_next(__current_task);     /* 轮转挑下一个任务 */
+    rlist_t *node = rlist_pop_head(&__ready_list);
+    next = RLIST_CONTAINER_OF(node,task_block_t,task_node);
 
     if (next == NULL)
     {

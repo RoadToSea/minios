@@ -1,10 +1,15 @@
-#ifndef __TIME_SLICE_CORE_H__
-#define __TIME_SLICE_CORE_H__
+#ifndef __MINIOS_H
+#define __MINIOS_H
 
 #include <stdint.h>
 #include "tools/rlist.h"
 
-#define MS_TO_TICK(ms)      (1000/ms)
+typedef enum task_state
+{
+    TASK_STATE_READY = 0,
+    TASK_STATE_DELAYED,
+    TASK_STATE_DELETED
+} task_state_t;
 
 
 typedef void (*task_func_t)(void *);
@@ -12,6 +17,7 @@ typedef void (*task_func_t)(void *);
 typedef struct task_block{
     const char *name;
     rlist_t  task_node;
+    task_state_t state;
     task_func_t func;
     void *func_arg;
     uint8_t *buf;
@@ -21,7 +27,7 @@ typedef struct task_block{
 }task_block_t;
 
 /* 全局任务表与当前任务：定义在 time_slice_core.c，task.c / port.c 都要碰 */
-extern rlist_t __task_list;
+extern rlist_t __ready_list;
 extern task_block_t *__current_task;
 
 task_block_t *time_slice_get_next(task_block_t *cur);

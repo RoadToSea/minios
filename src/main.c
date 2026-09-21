@@ -95,6 +95,7 @@ void handleA(void *arg)
 {
     while (1) {
         cntA++; /* 断点打这里，每次被调度进来就 +1 */
+        // task_delay(500);
     }
 }
 
@@ -111,9 +112,6 @@ int main(void)
     SystemConfig();
     USART_Printf_Init(115200); /* printf -> USART1 (PA9-TX/PA10-RX) */
     printf("system start, clock = %lu Hz\r\n", SystemCoreClock);
-
-    /* 1. 触发并观测普通模式下的中断 (TIM2 IRQ, MSP 栈环境) */
-    DebugProbe_RunNormalCall(0x11223344, 0x55667788);
 
     /* 2. 初始化轮转任务调度 (PendSV / SysTick, 进入 PSP 任务多栈环境) */
     time_slice_core_init();

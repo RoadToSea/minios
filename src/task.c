@@ -40,7 +40,7 @@ int task_add(task_block_t *tcb)
 
     rlist_init(&tcb->task_node);
     rlist_init(&tcb->task_node);
-    rlist_insert_after(&__task_list, &tcb->task_node);
+    rlist_insert_after(&__ready_list, &tcb->task_node);
     memset(tcb->buf, 0, tcb->buf_size);
 
     return 0;
@@ -120,7 +120,8 @@ int task_delay(uint32_t ms)
     tcb->delay_expire =  __tick_count +MS_TO_TICK(ms);
     pre_expired_node = __find_pre_expire_node(tcb->delay_expire);
     if(pre_expired_node){
-        rlist_remove(&tcb->task_node);
+        // 在PENDSV中已经从ready_list中摘除
+        // rlist_remove(&tcb->task_node);
         rlist_insert_after(pre_expired_node,&tcb->task_node);
     }
 
@@ -149,6 +150,6 @@ void task_delay_scan(void)
         }
 
         rlist_remove(&tcb->task_node);
-        rlist_push_tail(&__task_list, &tcb->task_node);
+        rlist_push_tail(&__ready_list, &tcb->task_node);
     }
 }
