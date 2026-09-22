@@ -5,7 +5,28 @@
 #include "task.h"
 #include "port.h"
 
-rlist_t __ready_list = {0};
+extern rlist_t __ready_list;
+
+/*
+ * 空闲任务：就绪表里永远保留的最后一张牌。
+ * 有了它，就绪表不会为空，time_slice_switch 的 pop_head 永远取得到
+ * 合法任务；其他任务全部 task_delay 时 CPU 停在 WFI 上等下一次
+ * 心跳，而不是把睡着的任务"复活"来空转。
+ */
+static uint8_t idle_buf[128];
+static void idle_loop(void *arg)
+{
+    (void)arg;
+    while (1)
+    {
+        __WFI();                                /* 等中断（下一次 SysTick 心跳） */
+    }
+}
+static task_block_t idle_task = {
+    .name     = "idle",
+    .func     = idle_loop,
+    .buf      = idle_buf,
+    .buf_size = sizeof(idle_buf)};
 
 /**
  * 从任务链表中取出下一个要运行的任务（轮转调度）
@@ -69,8 +90,9 @@ int time_slice_start_schedule(void)
     if (rlist_is_empty(&__ready_list))
     {
         return -1;                          /* 一个任务都没有，开心跳也没意义 */
-    }  
+    }
 
+    task_add(&idle_task);                   /* 空闲任务排在队尾：先跑用户任务，没得跑时兜底 */
     start_first_task(&__ready_list);         /* 立刻切进第一个任务，本函数不再返回 */
 
     return 0;                               /* 不会执行到，只为消编译警告 */

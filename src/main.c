@@ -57,20 +57,20 @@ void handleA(void *arg);
 void handleB(void *arg);
 
 rlist_t nodeA;
-uint8_t buf_A[128] = {0};
+uint8_t buf_A[256] = {0};
 task_block_t taskA = {
     .name     = "taskA",
     .func     = handleA,
     .buf      = buf_A,
-    .buf_size = 128};
+    .buf_size = 256};
 
 rlist_t nodeB;
-uint8_t buf_B[128] = {0};
+uint8_t buf_B[256] = {0};
 task_block_t taskB = {
     .name     = "taskB",
     .func     = handleB,
     .buf      = buf_B,
-    .buf_size = 128};
+    .buf_size = 256};
 
 static void SystemConfig(void)
 {
@@ -95,7 +95,7 @@ void handleA(void *arg)
 {
     while (1) {
         cntA++; /* 断点打这里，每次被调度进来就 +1 */
-        // task_delay(500);
+        task_delay(500);
     }
 }
 

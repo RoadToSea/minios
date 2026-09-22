@@ -8,9 +8,12 @@ static uint32_t tick_reload = 0;    /* SysTick 重装值：init 时只存，star
 
 void port_hardware_init(uint32_t beat_ms)
 {
-    RCC_SYSCLKConfig(RCC_SYSCLKSource_HSE);
+    // RCC_SYSCLKConfig(RCC_SYSCLKSource_HSE);
     NVIC_SetPriority(SysTick_IRQn,2);
     NVIC_SetPriority(PendSV_IRQn, 0xFF);    /* PendSV 设为最低优先级：切换不能打断别的中断 */
+
+    /* 每拍计数值：start_first_task 里以 tick_reload-1 写入 SysTick->LOAD */
+    tick_reload = SYSTICK_CLOCK_HZ / SYSTICK_RATE_HZ;
 
     /*
      * 此刻 PSP 还没指到合法内存，心跳一旦触发 PendSV，handler 会对
@@ -18,7 +21,7 @@ void port_hardware_init(uint32_t beat_ms)
      * SysTick 留到 start_first_task 里假帧全部建好之后再启动。
      */
     SysTick->CTRL = 0;                      /* 关闭Systick运行 */
-    SysTick->LOAD = SYSTICK_RELOAD - 1;
+    SysTick->LOAD = tick_reload;
     SysTick->VAL  = 0;
 }
 
@@ -107,15 +110,30 @@ uint32_t time_slice_switch(uint32_t sp)
     if (__current_task != NULL)
     {
         __current_task->stack_ptr = (void *)sp;     /* 保存切出任务的栈顶 */
+
+        /*
+         * pop_head 调度下，任务被调度进去时就已摘出就绪表，切出时必须
+         * 放回队尾，否则就绪表一轮转就空了。主动 task_delay 的任务已把
+         * 自己挂到延时队列（state == DELAYED），不能再放回就绪表。
+         */
+        if (__current_task->state == TASK_STATE_READY)
+        {
+            rlist_push_tail(&__ready_list, &__current_task->task_node);
+        }
     }
 
-    rlist_t *node = rlist_pop_head(&__ready_list);
-    next = RLIST_CONTAINER_OF(node,task_block_t,task_node);
-
-    if (next == NULL)
+    /*
+     * 必须先判空再 pop：pop_head 对空表返回 NULL，而
+     * RLIST_CONTAINER_OF(NULL,...) 得到 0-4=0xFFFFFFFC，不是 NULL，
+     * 后面无法用 next==NULL 拦住，会拿着垃圾栈顶去恢复 → HardFault。
+     */
+    if (rlist_is_empty(&__ready_list))
     {
-        return sp;                                  /* 兜底：无任务则原样返回 */
+        return sp;                                  /* 无任务可切：原样返回，当前任务继续跑 */
     }
+
+    next = RLIST_CONTAINER_OF(rlist_pop_head(&__ready_list),
+                              task_block_t, task_node);
 
     __current_task = next;                          /* 更新"当前任务"标记 */
 

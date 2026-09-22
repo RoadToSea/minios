@@ -6,7 +6,8 @@
 /* 当前正在运行的任务 */
 task_block_t *__current_task = NULL;
 /* 延时队列：睡着等节拍的任务挂在上面，由 task_delay_scan 每拍扫描 */
-static rlist_t __delay_list;
+rlist_t __delay_list;
+rlist_t __ready_list = {0};
 
 static uint32_t __tick_count = 0;
 
@@ -39,8 +40,7 @@ int task_add(task_block_t *tcb)
     }
 
     rlist_init(&tcb->task_node);
-    rlist_init(&tcb->task_node);
-    rlist_insert_after(&__ready_list, &tcb->task_node);
+    rlist_push_tail(&__ready_list, &tcb->task_node);    /* 尾插：先添加的先运行（FIFO） */
     memset(tcb->buf, 0, tcb->buf_size);
 
     return 0;
@@ -118,10 +118,15 @@ int task_delay(uint32_t ms)
 
     /* 当前 SysTick 为 1ms 一拍，因此 ms 直接作为节拍数使用。 */
     tcb->delay_expire =  __tick_count +MS_TO_TICK(ms);
+    if (tcb->state == TASK_STATE_DELAYED)
+    {
+        /* 已在延时队列（任务被"复活"过）：摘下来按新到期时间重排，防止节点重复插入成环 */
+        rlist_remove(&tcb->task_node);
+    }
+    tcb->state = TASK_STATE_DELAYED;    /* 标记延时态：PendSV 切出时据此不放回就绪表 */
     pre_expired_node = __find_pre_expire_node(tcb->delay_expire);
     if(pre_expired_node){
-        // 在PENDSV中已经从ready_list中摘除
-        // rlist_remove(&tcb->task_node);
+        /* 不需要自己从 ready_list 摘除：被调度进去时已被 pop_head 摘出 */
         rlist_insert_after(pre_expired_node,&tcb->task_node);
     }
 
@@ -144,12 +149,13 @@ void task_delay_scan(void)
         first_expired = RLIST_PEEK_FIRST(&__delay_list);
         tcb = RLIST_CONTAINER_OF(first_expired,task_block_t,task_node);
 
-        if (__tick_reached(__tick_count,tcb->delay_expire) < 0)
+        if (!__tick_reached(__tick_count, tcb->delay_expire))
         {
-            break;
+            break;          /* 队首未到期（列表按到期时间有序），后面更不会到 */
         }
 
         rlist_remove(&tcb->task_node);
+        tcb->state = TASK_STATE_READY;      /* 恢复"可被放回就绪表尾部"的身份 */
         rlist_push_tail(&__ready_list, &tcb->task_node);
     }
 }
