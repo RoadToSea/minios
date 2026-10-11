@@ -1,7 +1,7 @@
 version: "4.1"
 name: stm32_rtx_gcc
 type: ARM
-deviceName: STM32F102C8
+deviceName: STM32F103C8
 packDir: null
 srcDirs:
   - src
