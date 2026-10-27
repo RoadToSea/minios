@@ -88,7 +88,7 @@ void start_first_task(rlist_t *task_head)
     SysTick->VAL  = 0;
     SysTick->CTRL = SysTick_CTRL_CLKSOURCE_Msk     /* 内核时钟 */
                   | SysTick_CTRL_TICKINT_Msk       /* 计数到 0 触发中断 */
-                  | SysTick_CTRL_ENABLE_Msk;       /* 开火 */
+                  | SysTick_CTRL_ENABLE_Msk;       /* 启动 SysTick 定时器 */
 
     // NVIC_EnableIRQ(SysTick_IRQn);           /* 开启Systick中断*/
     SCB->ICSR = SCB_ICSR_PENDSVSET_Msk;     /* 置 PendSV 挂起 → 线程模式立即被抢占，开始第一次切换 */

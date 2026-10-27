@@ -3,6 +3,8 @@
 
 #include "time_slice_core.h"
 
+extern rlist_t __task_list;
+
 void task_init(void);                       /* 初始化任务模块私有的延时队列 */
 int  task_add(task_block_t *tcb);           /* 新任务加入就绪表 */
 int  task_delete(task_block_t *tcb);        /* 删除任务（支持删除正在运行的任务） */

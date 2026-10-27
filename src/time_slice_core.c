@@ -1,10 +1,10 @@
 #include "stm32f10x.h"
 #include "stm32f10x_it.h"
+#include <stddef.h>
 #include "time_slice_core.h"
 #include "task.h"
 #include "port.h"
 
-rlist_t __task_list = {0};
 
 task_block_t *__current_task = NULL;     /* 当前正在运行的任务 */
 
@@ -54,7 +54,7 @@ int time_slice_core_init(void)
 {
     port_hardware_init(1);
     rlist_init(&__task_list);
-    task_init();                            /* 延时队列归 task.c 管，这里只负责点火 */
+    task_init();                            /* 延时队列归 task.c 管，这里统一完成模块初始化 */
 
     return 0;
 }

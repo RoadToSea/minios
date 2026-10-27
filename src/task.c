@@ -10,6 +10,7 @@
 
 /* 延时队列：睡着等节拍的任务挂在上面，由 task_delay_scan 每拍扫描 */
 static rlist_t __delay_list;
+rlist_t __task_list = {0};
 
 void task_init(void)
 {
