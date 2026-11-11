@@ -3,18 +3,16 @@
 #include "task.h"
 
 /*
- * 任务管理：add（入就绪表）/ delete（出表）/ delay（pend 到延时队列）。
+ * 任务管理：add（入就绪表）/ delete（出表）
  * 就绪表 __task_list 和当前任务指针定义在 time_slice_core.c，
  * 调度决策（挑下一个任务）也归 core，本文件只负责维护任务的"在哪个表里"。
  */
 
-/* 延时队列：睡着等节拍的任务挂在上面，由 task_delay_scan 每拍扫描 */
-static rlist_t __delay_list;
 rlist_t __task_list = {0};
 
 void task_init(void)
 {
-    rlist_init(&__delay_list);
+    rlist_init(&__task_list);
 }
 
 int task_add(task_block_t *tcb)
