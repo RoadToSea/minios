@@ -9,7 +9,7 @@ extern rlist_t __ready_list;
 
 /*
  * 空闲任务：就绪表里永远保留的最后一张牌。
- * 有了它，就绪表不会为空，time_slice_switch 的 pop_head 永远取得到
+ * 有了它，就绪表不会为空，minios_task_switch 的 pop_head 永远取得到
  * 合法任务；其他任务全部 task_delay 时 CPU 停在 WFI 上等下一次
  * 心跳，而不是把睡着的任务"复活"来空转。
  */
@@ -33,7 +33,7 @@ static task_block_t idle_task = {
  * @cur  当前正在运行的任务；传 NULL 表示调度刚开始，取第一个任务
  * @return 下一个任务的 TCB；链表为空时返回 NULL
  */
-task_block_t *time_slice_get_next(task_block_t *cur)
+task_block_t *minios_get_next(task_block_t *cur)
 {
     rlist_t *node;
 
@@ -70,7 +70,7 @@ task_block_t *time_slice_get_next(task_block_t *cur)
 /**
  * 启动systick作为系统心跳
  */
-int time_slice_core_init(void)
+int minios_init(void)
 {
     port_hardware_init(1);
     rlist_init(&__ready_list);
@@ -85,7 +85,7 @@ int time_slice_core_init(void)
  * 心跳第一次溢出 → SysTick_Handler → 触发 PendSV → 切进第一个任务，
  * 从此 main() 永远不会再被运行（它已被切出且不在任务链表里）。
  */
-int time_slice_start_schedule(void)
+int minios_start(void)
 {
     if (rlist_is_empty(&__ready_list))
     {

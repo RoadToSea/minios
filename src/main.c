@@ -56,21 +56,23 @@
 void handleA(void *arg);
 void handleB(void *arg);
 
+#define TASKA_BUFSIZE 1024
 rlist_t nodeA;
-uint8_t buf_A[256] = {0};
+uint8_t buf_A[TASKA_BUFSIZE] = {0};
 task_block_t taskA = {
     .name     = "taskA",
     .func     = handleA,
     .buf      = buf_A,
-    .buf_size = 256};
+    .buf_size = TASKA_BUFSIZE};
 
+#define TASKB_BUFSIZE 1024
 rlist_t nodeB;
-uint8_t buf_B[256] = {0};
+uint8_t buf_B[TASKB_BUFSIZE] = {0};
 task_block_t taskB = {
     .name     = "taskB",
     .func     = handleB,
     .buf      = buf_B,
-    .buf_size = 256};
+    .buf_size = TASKB_BUFSIZE};
 
 static void SystemConfig(void)
 {
@@ -95,6 +97,7 @@ void handleA(void *arg)
 {
     while (1) {
         cntA++; /* 断点打这里，每次被调度进来就 +1 */
+        printf("cntA is :%d\n",cntA);
         task_delay(500);
     }
 }
@@ -103,6 +106,7 @@ void handleB(void *arg)
 {
     while (1) {
         cntB++; /* 断点打这里，每次被调度进来就 +1 */
+        printf("cntB is :%d\n",cntB);
         task_delay(500); /* 睡 500ms：期间 A 独占 CPU，到期后 B 回到就绪表尾部 */
     }
 }
@@ -114,10 +118,10 @@ int main(void)
     printf("system start, clock = %lu Hz\r\n", SystemCoreClock);
 
     /* 2. 初始化轮转任务调度 (PendSV / SysTick, 进入 PSP 任务多栈环境) */
-    time_slice_core_init();
+    minios_init();
     task_add(&taskA);
     task_add(&taskB);
-    time_slice_start_schedule(); /* 从这一行之后，CPU 就属于任务了 */
+    minios_start(); /* 从这一行之后，CPU 就属于任务了 */
 
     while (1) {
     }

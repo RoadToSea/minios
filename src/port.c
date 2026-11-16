@@ -32,7 +32,7 @@ void port_hardware_init(uint32_t beat_ms)
  * 任务栈上弹出 16 个字当作寄存器恢复。一个从没运行过的任务栈上是空的，
  * 所以必须预先摆好一整帧，让第一次切换看起来就像"这个任务刚被切出去过"。
  */
-static void task_build_first_frame(task_block_t * tcb)
+void task_build_first_frame(task_block_t * tcb)
 {
     uint32_t *sp;
 
@@ -95,50 +95,6 @@ void start_first_task(rlist_t *task_head)
     SCB->ICSR = SCB_ICSR_PENDSVSET_Msk;     /* 置 PendSV 挂起 → 线程模式立即被抢占，开始第一次切换 */
 }
 
-/**
- * PendSV_Handler 的汇编会调用本函数完成"存旧任务、挑新任务"。
- * 注意：不能加 static——它只被内联汇编字符串引用，加 static 会被
- * 编译器当作"没人用"而优化删除，导致链接错误。
- *
- * @sp   进入 PendSV 时保存完 r4-r11 之后的任务栈顶（指向 r4 的槽位）
- * @return 下一个任务的同位置栈顶（汇编拿它去恢复 r4-r11）
- */
-uint32_t time_slice_switch(uint32_t sp)
-{
-    task_block_t *next;
-
-    if (__current_task != NULL)
-    {
-        __current_task->stack_ptr = (void *)sp;     /* 保存切出任务的栈顶 */
-
-        /*
-         * pop_head 调度下，任务被调度进去时就已摘出就绪表，切出时必须
-         * 放回队尾，否则就绪表一轮转就空了。主动 task_delay 的任务已把
-         * 自己挂到延时队列（state == DELAYED），不能再放回就绪表。
-         */
-        if (__current_task->state == TASK_STATE_READY)
-        {
-            rlist_push_tail(&__ready_list, &__current_task->task_node);
-        }
-    }
-
-    /*
-     * 必须先判空再 pop：pop_head 对空表返回 NULL，而
-     * RLIST_CONTAINER_OF(NULL,...) 得到 0-4=0xFFFFFFFC，不是 NULL，
-     * 后面无法用 next==NULL 拦住，会拿着垃圾栈顶去恢复 → HardFault。
-     */
-    if (rlist_is_empty(&__ready_list))
-    {
-        return sp;                                  /* 无任务可切：原样返回，当前任务继续跑 */
-    }
-
-    next = RLIST_CONTAINER_OF(rlist_pop_head(&__ready_list),
-                              task_block_t, task_node);
-
-    __current_task = next;                          /* 更新"当前任务"标记 */
-
-    return (uint32_t)next->stack_ptr;               /* 返回下一个任务的栈顶 */
-}
 
 void SysTick_Handler(void)
 {
@@ -161,7 +117,7 @@ __attribute__((naked)) void PendSV_Handler(void)
         "stmdb  r0!, {r4-r11}       \n"    /* 手动压 r4-r11（满递减），r0 落到 r4 槽位 */
 
         /* ================= 交给 C 调度 ===== ============ */
-        "bl     time_slice_switch   \n"    /* 传入 r0=旧栈顶，返回 r0=新栈顶
+        "bl     minios_task_switch  \n"    /* 传入 r0=旧栈顶，返回 r0=新栈顶
                                               安全性：r0-r3/r12 已被硬件自动压栈，
                                               C 函数随便用这几个寄存器 */
 

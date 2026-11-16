@@ -7,7 +7,8 @@
 typedef enum task_state
 {
     TASK_STATE_READY = 0,
-    TASK_STATE_DELAYED,
+    TASK_STATE_RUNNING,
+    TASK_STATE_DELAY,
     TASK_STATE_DELETED
 } task_state_t;
 
@@ -26,12 +27,12 @@ typedef struct task_block{
     uint32_t delay_expire;      /* 绝对到期节拍，仅在延时队列中有效 */
 }task_block_t;
 
-/* 全局任务表与当前任务：定义在 time_slice_core.c，task.c / port.c 都要碰 */
+/* 全局任务表与当前任务：定义在 task.c，minios.c / port.c 都要碰 */
 extern rlist_t __ready_list;
 extern task_block_t *__current_task;
 
-task_block_t *time_slice_get_next(task_block_t *cur);
-int time_slice_core_init(void);
-int time_slice_start_schedule(void);
+task_block_t *minios_get_next(task_block_t *cur);
+int minios_init(void);
+int minios_start(void);
 
 #endif
