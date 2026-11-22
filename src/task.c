@@ -2,17 +2,20 @@
 #include "task.h"
 #include "port.h"
 #include "minios_config.h"
-
+#include "minios.h"
 
 /* 当前正在运行的任务 */
 task_block_t *__current_task = NULL;
 /* 延时队列：睡着等节拍的任务挂在上面，由 task_delay_scan 每拍扫描 */
-rlist_t __delay_list;
-rlist_t __ready_list;
+static rlist_t __delay_list;
+/* 就绪队列：存放各优先级的就绪任务（运行态任务亦保留于所属队列队首） */
+static rlist_t __ready_list[MINIOS_PRIORITY_MAX_NUM];
+/* 优先级就绪位图：bit N 为 1 表示优先级 N 的链表非空 */
+static uint32_t __ready_priority_mask = 0U;
 
-static uint32_t __tick_count = 0;
+static uint32_t __tick_count = 0U;
 
-static inline task_block_t* __get_cur_task(void)
+static inline task_block_t *__get_cur_task(void)
 {
     return __current_task;
 }
@@ -27,199 +30,307 @@ static inline int __tick_reached(uint32_t now, uint32_t expire)
     return (int32_t)(now - expire) >= 0;
 }
 
-void task_init(void)
+static inline uint32_t __get_highest_priority(uint32_t mask)
 {
-    rlist_init(&__delay_list);
-    rlist_init(&__ready_list);
+    if (mask == 0U)
+    {
+        /* 空闲任务永远常驻，mask 理论上绝不可能为 0 */
+        while (1)
+        {
+            __BKPT(0);
+        }
+    }
+    return port_ctz(mask);
 }
 
-int task_add(task_block_t *tcb)
+static inline void __ready_enqueue(task_block_t *tcb)
 {
-    if (tcb == NULL)
+    rlist_push_tail(&__ready_list[tcb->priority], &tcb->task_node);
+    __ready_priority_mask |= (1U << tcb->priority);
+}
+
+static inline void __ready_dequeue(task_block_t *tcb)
+{
+    rlist_remove(&tcb->task_node);
+    if (rlist_is_empty(&__ready_list[tcb->priority]))
     {
-        return -1;
+        __ready_priority_mask &= ~(1U << tcb->priority);
+    }
+}
+
+uint32_t minios_get_tick(void)
+{
+    return __tick_count;
+}
+
+void task_init(void)
+{
+    __current_task = NULL;
+    __ready_priority_mask = 0U;
+    __tick_count = 0U;
+    rlist_init(&__delay_list);
+    for (uint32_t i = 0U; i < MINIOS_PRIORITY_MAX_NUM; i++)
+    {
+        rlist_init(&__ready_list[i]);
+    }
+}
+
+int task_has_ready(void)
+{
+    return __ready_priority_mask != 0U;
+}
+
+minios_err_t task_add(task_block_t *tcb)
+{
+    uint32_t primask;
+    uintptr_t top;
+
+    if (tcb == NULL || tcb->func == NULL || tcb->buf == NULL ||
+        tcb->buf_size < 64U || tcb->priority >= MINIOS_PRIORITY_MAX_NUM)
+    {
+        return MINIOS_EINVAL;
+    }
+
+    top = ((uintptr_t)tcb->buf + tcb->buf_size) & ~(uintptr_t)0x7U;
+    if (top <= (uintptr_t)tcb->buf || (top - (uintptr_t)tcb->buf) < 64U)
+    {
+        return MINIOS_EINVAL;
+    }
+
+    if (tcb->task_node.next != NULL && tcb->task_node.next != &tcb->task_node)
+    {
+        return MINIOS_EBUSY;
     }
 
     rlist_init(&tcb->task_node);
-
-    rlist_push_tail(&__ready_list, &tcb->task_node);    /* 尾插：先添加的先运行（FIFO） */
-    tcb->state = TASK_STATE_READY;
-
     memset(tcb->buf, 0, tcb->buf_size);
+    task_build_first_frame(tcb);
 
-    return 0;
+    primask = __get_PRIMASK();
+    __disable_irq();
+
+    tcb->state = TASK_STATE_READY;
+    __ready_enqueue(tcb);
+    if (__current_task != NULL && tcb->priority < __current_task->priority)
+    {
+        SCB->ICSR = SCB_ICSR_PENDSVSET_Msk;
+    }
+
+    __set_PRIMASK(primask);
+    __DSB();
+    __ISB();
+    return MINIOS_EOK;
 }
 
-/**
- * 删除任务。无论它在就绪表还是延时队列里，一个 rlist_remove 都能摘掉
- * （侵入式链表的节点同一时刻只会在一个表里）。
- *
- * 删除"正在运行的任务"也是安全的：把 __current_task 置空后，
- * 下一次 PendSV 切换时 core 会像"第一次切换"一样直接取就绪表第一个任务，
- * 被删任务的栈不会再被恢复。
- */
-int task_delete(task_block_t *tcb)
+static int __task_detach(task_block_t *tcb)
+{
+    if (tcb->state == TASK_STATE_READY || tcb->state == TASK_STATE_RUNNING)
+    {
+        __ready_dequeue(tcb);
+        return 0;
+    }
+    if (tcb->state == TASK_STATE_DELAY)
+    {
+        rlist_remove(&tcb->task_node);
+        return 0;
+    }
+    return -1;
+}
+
+minios_err_t task_delete(task_block_t *tcb)
 {
     uint32_t primask;
 
     if (tcb == NULL)
     {
-        return -1;
+        return MINIOS_EINVAL;
     }
 
     primask = __get_PRIMASK();
     __disable_irq();
 
-    if (tcb->task_node.next != NULL && tcb->task_node.prev != NULL)
+    if (tcb->state == TASK_STATE_DELETED ||
+        tcb->task_node.next == NULL || tcb->task_node.prev == NULL ||
+        __task_detach(tcb) != 0)
     {
-        rlist_remove(&tcb->task_node);
+        __set_PRIMASK(primask);
+        return MINIOS_EINVAL;
     }
+
     tcb->state = TASK_STATE_DELETED;
 
-    /* 如果删除的任务是当前正在运行的任务，需要触发任务中断 */
     if (tcb == __get_cur_task())
     {
         __set_cur_task(NULL);
         SCB->ICSR = SCB_ICSR_PENDSVSET_Msk;
         __set_PRIMASK(primask);
 
-        /* 阻断执行流：绝对不允许自杀任务继续向下返回或执行用户代码 */
-        while (1)
+        /* 仅在线程模式下阻断自杀任务继续执行；中断内调用须立即返回以便 PendSV 接管 */
+        if (__get_IPSR() == 0U)
         {
-            __WFI();
+            while (1)
+            {
+                __WFI();
+            }
         }
+        return MINIOS_EOK;
     }
 
     __set_PRIMASK(primask);
-    return 0;
+    return MINIOS_EOK;
 }
 
-static rlist_t* __find_pre_expire_node(uint32_t tick)
+static rlist_t *__find_pre_expire_node(uint32_t tick)
 {
-    rlist_t *node =NULL;
+    rlist_t *node = NULL;
     task_block_t *tcb = NULL;
-    RLIST_FOR_EACH(node,&__delay_list){
-        tcb = RLIST_CONTAINER_OF(node,task_block_t,task_node);
-        /* last node delay tick is less than insert, current node tick is bigger than insert*/
-        if ((int32_t)(tcb->delay_expire - tick) > 0){
+
+    RLIST_FOR_EACH(node, &__delay_list)
+    {
+        tcb = RLIST_CONTAINER_OF(node, task_block_t, task_node);
+        if ((int32_t)(tcb->delay_expire - tick) > 0)
+        {
             return node->prev;
         }
     }
 
-    /* the whole delay list is less than insert, return list tail (empty -> head itself) */
     return __delay_list.prev;
 }
 
-/**
- * @brief   任务延时函数
- *
- * @param   延时时间ms
- * @return
- */
-int task_delay(uint32_t ms)
+minios_err_t task_delay(uint32_t ms)
 {
     uint32_t primask;
-    task_block_t *tcb = __get_cur_task();
-    rlist_t *pre_expired_node = NULL;
+    task_block_t *tcb;
+    rlist_t *pre_expired_node;
 
-    /* 单次延时不得超过 0x7FFFFFFF 个 Tick, 否则会产生溢出 */
-    if(ms == 0 || MS_TO_TICK(ms)>  0x7FFFFFFFU){
-        return -1;
+    if (__get_IPSR() != 0U)
+    {
+        return MINIOS_EISR;
     }
 
+    /* 单次延时不得超过 0x7FFFFFFF 个 Tick，否则有符号差值比较将发生回绕误判 */
+    if (ms == 0U || MS_TO_TICK(ms) > 0x7FFFFFFFU)
+    {
+        return MINIOS_EINVAL;
+    }
+
+    tcb = __get_cur_task();
     if (tcb == NULL || tcb->state != TASK_STATE_RUNNING)
     {
-        while (1) { __BKPT(0); }
+        return MINIOS_ERROR;
     }
 
-    /* 进入临界区,为什么不使用互斥锁是因为__dealy_list是共享资源,可能会被task_delay_scan在Systick中断中调用,在中断中调用互斥锁会在中断中等待导致系统死锁 */
+    /* 临界区保护：__delay_list 与 __ready_list 会被 SysTick 中断中的 task_delay_scan 访问 */
     primask = __get_PRIMASK();
     __disable_irq();
 
-    tcb->delay_expire =  __tick_count +MS_TO_TICK(ms);
-    tcb->state = TASK_STATE_DELAY;    /* 标记延时态：PendSV 切出时据此不放回就绪表 */
+    __ready_dequeue(tcb);
+    tcb->delay_expire = __tick_count + MS_TO_TICK(ms);
+    tcb->state = TASK_STATE_DELAY;
     pre_expired_node = __find_pre_expire_node(tcb->delay_expire);
-    if(pre_expired_node){
-        /* 不需要自己从 ready_list 摘除：被调度进去时已被 pop_head 摘出 */
-        rlist_insert_after(pre_expired_node,&tcb->task_node);
-    }
-
-    /* 让当前任务尽快切出；PendSV 中仍可保存它的栈指针。 */
+    rlist_insert_after(pre_expired_node, &tcb->task_node);
     SCB->ICSR = SCB_ICSR_PENDSVSET_Msk;
 
     __set_PRIMASK(primask);
-
-    return 0;
+    __DSB();
+    __ISB();
+    return MINIOS_EOK;
 }
 
-void task_delay_scan(void)
+static void __delay_wake_expired(void)
 {
     rlist_t *first_expired;
     task_block_t *tcb;
 
-    __tick_count++;
-    /* task has expired */
-    while(!rlist_is_empty(&__delay_list)){
+    while (!rlist_is_empty(&__delay_list))
+    {
         first_expired = RLIST_PEEK_FIRST(&__delay_list);
-        tcb = RLIST_CONTAINER_OF(first_expired,task_block_t,task_node);
+        tcb = RLIST_CONTAINER_OF(first_expired, task_block_t, task_node);
 
         if (!__tick_reached(__tick_count, tcb->delay_expire))
         {
-            break;          /* 队首未到期（列表按到期时间有序），后面更不会到 */
+            /* 延时队列按到期时间升序排列，队首未到期则后续节点必未到期 */
+            break;
         }
 
         rlist_remove(&tcb->task_node);
-        tcb->state = TASK_STATE_READY;      /* 恢复"可被放回就绪表尾部"的身份 */
-        rlist_push_tail(&__ready_list, &tcb->task_node);
+        tcb->state = TASK_STATE_READY;
+        __ready_enqueue(tcb);
     }
 }
 
-
-
-/**
- * PendSV_Handler 的汇编会调用本函数完成"存旧任务、挑新任务"。
- * 注意：不能加 static——它只被内联汇编字符串引用，加 static 会被
- * 编译器当作"没人用"而优化删除，导致链接错误。
- *
- * @sp   进入 PendSV 时保存完 r4-r11 之后的任务栈顶（指向 r4 的槽位）
- * @return 下一个任务的同位置栈顶（汇编拿它去恢复 r4-r11）
- */
-uint32_t minios_task_switch(uint32_t sp)
+int tick_inc_handler(void)
 {
-    task_block_t *next;
+    uint32_t primask;
+    uint32_t priority;
+    rlist_t *head;
+    task_block_t *highest;
+    int ret = MINIOS_EOK;
 
-    if (__current_task != NULL)
+    primask = __get_PRIMASK();
+    __disable_irq();
+
+    __tick_count++;
+    __delay_wake_expired();
+
+    priority = __get_highest_priority(__ready_priority_mask);
+    head = &__ready_list[priority];
+
+    /* 最高优先级存在多任务轮转，或队首任务非当前运行任务时触发切换 */
+    if (head->next != head->prev)
     {
-        __current_task->stack_ptr = (void *)sp;     /* 保存切出任务的栈顶 */
-
-        /*
-         * pop_head 调度下，任务被调度进去时就已摘出就绪表，切出时必须
-         * 放回队尾，否则就绪表一轮转就空了。主动 task_delay 的任务已把
-         * 自己挂到延时队列（state == DELAYED），不能再放回就绪表。
-         */
-        if (__current_task->state == TASK_STATE_RUNNING)
+        ret = MINIOS_ETASK_TOG;
+    }
+    else
+    {
+        highest = RLIST_CONTAINER_OF(head->next, task_block_t, task_node);
+        if (__current_task == NULL || highest != __current_task)
         {
-            __current_task->state = TASK_STATE_READY;
-            rlist_push_tail(&__ready_list, &__current_task->task_node);
+            ret = MINIOS_ETASK_TOG;
         }
     }
 
-    /*
-     * 必须先判空再 pop：pop_head 对空表返回 NULL，而
-     * RLIST_CONTAINER_OF(NULL,...) 得到 0-4=0xFFFFFFFC，不是 NULL，
-     * 后面无法用 next==NULL 拦住，会拿着垃圾栈顶去恢复 → HardFault。
-     */
-    if (rlist_is_empty(&__ready_list))
+    __set_PRIMASK(primask);
+    return ret;
+}
+
+/*
+ * 不能加 static：仅由 PendSV_Handler 内联汇编引用，加 static 会被编译器优化删除。
+ */
+uint32_t minios_task_switch(uint32_t sp)
+{
+    uint32_t primask;
+    task_block_t *next;
+    uint32_t task_priority;
+
+    /* PendSV 优先级低于 SysTick，须关中断避免切出期间被 SysTick 并发修改就绪表与位图 */
+    primask = __get_PRIMASK();
+    __disable_irq();
+
+    if (__current_task != NULL)
     {
-        return sp;                                  /* 无任务可切：原样返回，当前任务继续跑 */
+        __current_task->stack_ptr = (void *)sp;
+
+        /* 仅当任务仍为运行态时才轮转至同优先级队尾；已主动休眠的任务位于延时队列中 */
+        if (__current_task->state == TASK_STATE_RUNNING)
+        {
+            rlist_t *cur_head = &__ready_list[__current_task->priority];
+            __current_task->state = TASK_STATE_READY;
+            if (cur_head->next != cur_head->prev)
+            {
+                rlist_remove(&__current_task->task_node);
+                rlist_push_tail(cur_head, &__current_task->task_node);
+            }
+        }
     }
 
-    next = RLIST_CONTAINER_OF(rlist_pop_head(&__ready_list),
-                              task_block_t, task_node);
+    task_priority = __get_highest_priority(__ready_priority_mask);
+    next = RLIST_PEEK_FIRST_ENTRY(&__ready_list[task_priority],
+                                  task_block_t, task_node);
 
-    __current_task = next;                          /* 更新"当前任务"标记 */
-
+    __current_task = next;
     __current_task->state = TASK_STATE_RUNNING;
 
-    return (uint32_t)next->stack_ptr;               /* 返回下一个任务的栈顶 */
+    __set_PRIMASK(primask);
+    return (uint32_t)next->stack_ptr;
 }

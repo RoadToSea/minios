@@ -1,54 +1,10 @@
-/*
- * ************************************************
- *
- *              STM32 blink + debug probe demo
- *
- *  CPU: STM32F103C8
- *  PIN: PC13
- *
- *  The function-call / interrupt-call observation code
- *  lives in src/debug_probe.c and is exposed through
- *  src/debug_probe.h; the RTOS multi-thread test lives
- *  in src/rtos_test.c. The bare-metal / RTOS switch is
- *  src/probe_config.h (RTOS_TEST_ENABLED).
- *
- *  Add the probe* symbols from debug_probe.h to the
- *  debugger watch view to observe both contexts:
- *    - thread mode (bare metal: MSP / RTOS: PSP)
- *    - handler mode (TIM2 IRQ, always MSP)
- *
- *  How the vectors connect (startup_stm32f10x_md.s):
- *    g_pfnVectors[44] = TIM2_IRQHandler   (16 core + 28 TIM2_IRQn)
- *    g_pfnVectors[11] = SVC_Handler       -> RTX irq_armv7m.S
- *    g_pfnVectors[14] = PendSV_Handler    -> RTX context switch
- *    g_pfnVectors[15] = SysTick_Handler   -> RTX tick / osDelay
- *  This project always compiles irq_armv7m.S, so those three
- *  vectors are bound to the RTX code in both modes; in
- *  bare-metal mode they simply never fire (SysTick is
- *  disabled in SystemConfig and no SVC/PendSV is issued).
- *
- *  Suggested stepping exercise:
- *    1. breakpoint on DebugProbe_RunNormalCall - step over
- *       NVIC_SetPendingIRQ and watch control jump straight to
- *       TIM2_IRQHandler (vector fetch, not a normal call)
- *    2. step through TIM2_IRQHandler into ProbeIrqBody -
- *       compare SP (MSP), IPSR, LR (EXC_RETURN) with the
- *       probeNormalRegs values captured just before
- *    3. single-step the exception return (bx lr with
- *       EXC_RETURN in LR) and see PC land back on the
- *       __NOP() loop in main(), SP restored
- *
- * ************************************************
- */
+
 
 #include <stdio.h>
 #include "stm32f10x.h"
 #include "cmsis_os2.h"
 #include "stm32f10x_rcc.h"
 #include "system_stm32f10x.h"
-#include "debug_probe.h"
-#include "rtos_test.h"
-#include "probe_config.h"
 #include "minios.h"
 #include "task.h"
 #include "usart_printf.h"
@@ -57,19 +13,19 @@ void handleA(void *arg);
 void handleB(void *arg);
 
 #define TASKA_BUFSIZE 1024
-rlist_t nodeA;
 uint8_t buf_A[TASKA_BUFSIZE] = {0};
 task_block_t taskA = {
     .name     = "taskA",
+    .priority = 1U,
     .func     = handleA,
     .buf      = buf_A,
     .buf_size = TASKA_BUFSIZE};
 
 #define TASKB_BUFSIZE 1024
-rlist_t nodeB;
 uint8_t buf_B[TASKB_BUFSIZE] = {0};
 task_block_t taskB = {
     .name     = "taskB",
+    .priority = 2U,
     .func     = handleB,
     .buf      = buf_B,
     .buf_size = TASKB_BUFSIZE};
@@ -95,19 +51,21 @@ volatile uint32_t cntB = 0;
 
 void handleA(void *arg)
 {
+    (void)arg;
     while (1) {
         cntA++; /* 断点打这里，每次被调度进来就 +1 */
-        printf("cntA is :%d\n",cntA);
+        printf("cntA is :%lu\n", (unsigned long)cntA);
         task_delay(500);
     }
 }
 
 void handleB(void *arg)
 {
+    (void)arg;
     while (1) {
         cntB++; /* 断点打这里，每次被调度进来就 +1 */
-        printf("cntB is :%d\n",cntB);
-        task_delay(500); /* 睡 500ms：期间 A 独占 CPU，到期后 B 回到就绪表尾部 */
+        printf("cntB is :%lu\n", (unsigned long)cntB);
+        task_delay(100); /* 睡 500ms：期间 A 独占 CPU，到期后 B 回到就绪表尾部 */
     }
 }
 

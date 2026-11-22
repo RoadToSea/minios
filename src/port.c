@@ -8,6 +8,7 @@ static uint32_t tick_reload = 0;    /* SysTick 重装值：init 时只存，star
 
 void port_hardware_init(uint32_t beat_ms)
 {
+    (void)beat_ms;
     // RCC_SYSCLKConfig(RCC_SYSCLKSource_HSE);
     NVIC_SetPriority(SysTick_IRQn,2);
     NVIC_SetPriority(PendSV_IRQn, 0xFF);    /* PendSV 设为最低优先级：切换不能打断别的中断 */
@@ -62,10 +63,8 @@ void task_build_first_frame(task_block_t * tcb)
     tcb->stack_ptr = sp;                    /* 指向 R4 槽位，与 PendSV 恢复流程的约定一致 */
 }
 
-void start_first_task(rlist_t *task_head)
+void start_first_task(void)
 {
-    task_block_t *pos;
-
     /*
      * 第一次进 PendSV 时 main 还跑在 MSP 上，PSP 里是个无效值（复位后
      * 未初始化）。而 PendSV 一进来就 stmdb 往 PSP 指向的栈里压 r4-r11，
@@ -75,11 +74,6 @@ void start_first_task(rlist_t *task_head)
      */
     static uint32_t first_psp_scratch[16];  /* 只需 8 个字，翻倍留余量 */
     __set_PSP((uint32_t)(first_psp_scratch + 16));
-
-    RLIST_FOR_EACH_ENTRY(pos, task_head, task_block_t, task_node)
-    {
-        task_build_first_frame(pos);
-    }
 
     /*
      * 假帧全部就绪、PSP scratch 已指到合法内存，现在启动心跳才安全。
@@ -91,16 +85,17 @@ void start_first_task(rlist_t *task_head)
                   | SysTick_CTRL_TICKINT_Msk       /* 计数到 0 触发中断 */
                   | SysTick_CTRL_ENABLE_Msk;       /* 开火 */
 
-    // NVIC_EnableIRQ(SysTick_IRQn);           /* 开启Systick中断*/
     SCB->ICSR = SCB_ICSR_PENDSVSET_Msk;     /* 置 PendSV 挂起 → 线程模式立即被抢占，开始第一次切换 */
+    __DSB();
+    __ISB();
 }
 
 
 void SysTick_Handler(void)
 {
-    task_delay_scan();                      /* 扫延时队列，到期任务移回就绪表 */
-
-    SCB->ICSR = SCB_ICSR_PENDSVSET_Msk;     /* 置 PendSV 挂起，请求一次上下文切换 */
+    if(tick_inc_handler() == MINIOS_ETASK_TOG){
+        SCB->ICSR = SCB_ICSR_PENDSVSET_Msk;     /* 置 PendSV 挂起，请求一次上下文切换 */
+    }
 }
 
 
